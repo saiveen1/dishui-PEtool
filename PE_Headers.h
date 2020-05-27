@@ -1,15 +1,6 @@
 #pragma once
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <windows.h>
 #include "nameDefine.h"
-#include <algorithm>
-//max min sum ...函数
-#include <time.h>
-#include "ChangePe.h"
-#pragma warning(disable:4996)
-
 //不能放在nameDefine会出现重定义
 
 //以RvaDataToRawData开始使用这个结构简化代码
@@ -68,7 +59,7 @@ Output:
 Return: 正常返回空闲地址FOA 否则申请一个新节返回新节FOA
 Others:
 *************************************************/
-DWORD GetFreeSpaceInSection(LPVOID pFileBuffer, size_t sizeOfAddedData, BOOL changeVirtualSize);
+DWORD GetFreeSpaceInSection(LPVOID pFileBuffer, size_t sizeOfAddedData, BOOL changeVirtualSize, DWORD sizeOfFile);
 
 /*************************************************
 Function: PrintNTHeaders
@@ -82,7 +73,7 @@ Output: pFileBuffer 文件缓冲区
 Return: 无返回
 Others:
 *************************************************/
-void PrintNTHeaders(LPSTR filePath, OUT LPVOID *pFileBuffer);
+void PrintNTHeaders(LPSTR inFilePath);
 
 
 //5.14所谓偏移偏移 是不包括缓冲区的, 之前没彻底搞懂这个概念, 写代码的时候就弄混好几次, 所以5.11的修改其实是没必要的
@@ -100,7 +91,7 @@ Others:
 	//5.11在做导入表的时候 要求直接在FileBuffer里面操作 就导致不需要ImageBuffer 要换回imagebase
 	//所以加了第三个参数 BOOL isImageBuffer
 *************************************************/
-DWORD RvaDataToFoaData(IN LPVOID pImageBuffer, IN DWORD dwRvaDataAddress, BOOL isImageBuffer);
+DWORD RvaDataToFoaData(IN LPVOID pImageBuffer, IN DWORD dwRvaDataAddress);
 
 /*************************************************
 Function: RawDataToRvaData
@@ -129,7 +120,7 @@ Output: pImageBuffer 模拟的内存缓冲区
 Return: 成功返回SizeOfImage
 Others: 文件缓冲到内存缓冲 区段表之后的是无用数据 不加载进内存 所以后续保存的时候是没有那些无效信息的
 *************************************************/
-DWORD CopyFileBufferToImageBuffer(IN LPVOID pFileBuffer, OUT LPVOID *pImageBuffer);
+DWORD CopyFileBufferToImageBuffer(LPSTR inFilePath, OUT LPVOID *pImageBuffer);
 
 /*************************************************
 Function: CopyImageBufferToFileBuffer
@@ -160,7 +151,7 @@ Others:
 *************************************************/
 DWORD BufferToFile(IN LPVOID pMemBuffer, IN size_t fileSize, OUT LPSTR lpszFile);
 
-DWORD TraverseDataDirectory(LPVOID pBuffer, LPSTR inFilePath);
+DWORD TraverseDataDirectory(LPSTR inFilePath);
 
 
 /*************************************************
@@ -176,7 +167,7 @@ Return:
 Others: 需要频繁调用RVATOFOA 存储的地址均为IMAGEBUFFER中的地址
 5.12没名字的函数序号找不到
 *************************************************/
-DWORD PrintExportDirectory(LPVOID *pFileBuffer, LPSTR inFilePath);
+DWORD PrintExportDirectory(LPSTR inFilePath);
 
 /*************************************************
 Function: GetFunctionAddrByName
@@ -207,7 +198,7 @@ Output:
 Return:
 Others: 
 *************************************************/
-DWORD PrintBaseRelocation(LPVOID pFileBuffer, LPSTR inFilePath);
+DWORD PrintBaseRelocation(LPSTR inFilePath);
 
 /*************************************************
 Function: PrintImportDirectory
@@ -221,7 +212,8 @@ Output:
 Return:
 Others:
 *************************************************/
-DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath);
+DWORD PrintImportDescriptor(LPSTR inFilePath);
 
-DWORD PrintBoundImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath);
+DWORD PrintBoundImportDescriptor(LPSTR inFilePath);
 
+DWORD GetSectionNum(LPVOID pFileBuffer, DWORD foaData);

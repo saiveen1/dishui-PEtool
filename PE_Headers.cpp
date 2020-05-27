@@ -1,3 +1,4 @@
+#include "nameDefine.h"
 #include "PE_Headers.h"
 const char *nameOfDataDirectory[16] =
 {
@@ -18,10 +19,7 @@ const char *nameOfDataDirectory[16] =
 	"COM     ",
 	"保留    ",
 };
-
-
-
-
+static DWORD sizeOfFile = 0;
 
 void InitializePheader(IN LPVOID pBuffer, OUT pHeader pHeader, OUT PeList PeList)
 {
@@ -104,7 +102,7 @@ DWORD IsStandardPeFile(LPVOID pBuffer)
 	return TRUE;
 }
 
-DWORD GetFreeSpaceInSection(LPVOID pFileBuffer, size_t sizeOfAddedData, BOOL changeVirtualSize)
+DWORD GetFreeSpaceInSection(LPVOID pFileBuffer, size_t sizeOfAddedData, BOOL changeVirtualSize, DWORD sizeOfFile)
 {
 	Header header;
 	SList slist;
@@ -112,11 +110,22 @@ DWORD GetFreeSpaceInSection(LPVOID pFileBuffer, size_t sizeOfAddedData, BOOL cha
 
 	InitializePheader(pFileBuffer, &header, &slist);
 
+	PIMAGE_SECTION_HEADER pLastSectionHeader = header.pSectionHeader + slist.numOfSections - 1;
+	if (pLastSectionHeader->SizeOfRawData + pLastSectionHeader->PointerToRawData < (sizeOfFile - 1))
+	{
+		DWORD dw_temp = pLastSectionHeader->SizeOfRawData + pLastSectionHeader->PointerToRawData + (DWORD)pFileBuffer;
+		DWORD sizeOfUselessSpace = sizeOfFile - (pLastSectionHeader->SizeOfRawData + pLastSectionHeader->PointerToRawData) - 1;
+		memset((LPVOID)dw_temp, 0, sizeOfUselessSpace); //内存对齐
+		pLastSectionHeader->SizeOfRawData = pLastSectionHeader->SizeOfRawData + sizeOfUselessSpace;
+		header.pOptionalHeader->SizeOfImage += sizeOfUselessSpace;
+	}
+
 	for (DWORD i = 0; i < slist.numOfSections; i++)
 	{
 		DWORD foaNextSection = header.pSectionHeader->PointerToRawData + header.pSectionHeader->SizeOfRawData;
 		//花了两个小时...就因为这个地方, 要减去当前区段的文件偏移才是空闲空间
-		DWORD freeSpace = (foaNextSection - header.pSectionHeader->Misc.VirtualSize - header.pSectionHeader->PointerToRawData);
+		DWORD freeSpace = foaNextSection - header.pSectionHeader->Misc.VirtualSize - header.pSectionHeader->PointerToRawData;
+
 		if (sizeOfAddedData < freeSpace && ((int)freeSpace > 0))
 		{
 			foaFreeSpace = header.pSectionHeader->PointerToRawData + header.pSectionHeader->Misc.VirtualSize;
@@ -128,27 +137,18 @@ DWORD GetFreeSpaceInSection(LPVOID pFileBuffer, size_t sizeOfAddedData, BOOL cha
 		header.pSectionHeader++;
 	}
 
-	//BYTE nameOfNewSection[8] = { 0X2E,0X72,0X6E,0X65,0X77 };
-	//char c_outFilePathWithNewSection[] = "";
-	//AllocateNewSection(IN OUT pFileBuffer, nameOfNewSection, 0x1000, c_outFilePathWithNewSection);
-	//InitializePheader(pFileBuffer, &header, &slist);	//pFileBuffer换为新加section的缓冲区
-
-	//if (changeVirtualSize)
-	//	header.pSectionHeader->Misc.VirtualSize += sizeOfAddedData;
-	//return (header.pSectionHeader->PointerToRawData);
 	return NEED_TO_ALLOCATE_NEW_SECTION;
 }
 
-void PrintNTHeaders(LPSTR filePath,OUT LPVOID *pFileBuffer)
+void PrintNTHeaders(LPSTR inFilePath)
 {
 	Header header;
 	SList slist;
-	DWORD fileSize = 0;
 
-	*pFileBuffer = ReadPeFile(filePath,&fileSize);
-	InitializePheader(*pFileBuffer, &header, &slist);
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &sizeOfFile);
+	InitializePheader(pFileBuffer, &header, &slist);
 
-	if (!IsStandardPeFile(*pFileBuffer))
+	if (!IsStandardPeFile(pFileBuffer))
 	{
 		printf("IMAGETOFILE出错.");
 		free(pFileBuffer);
@@ -194,13 +194,15 @@ void PrintNTHeaders(LPSTR filePath,OUT LPVOID *pFileBuffer)
 		header.pSectionHeader++;
 	}
 	printf("\n\n\n\n\n\n\n\n\n\n");
+	free(pFileBuffer);
 }
 
-DWORD CopyFileBufferToImageBuffer(IN LPVOID pFileBuffer,OUT LPVOID *pImageBuffer)
+DWORD CopyFileBufferToImageBuffer(LPSTR inFilePath,OUT LPVOID *pImageBuffer)
 {
 	Header header;
 	SList slist;
 
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &sizeOfFile);
 	InitializePheader(pFileBuffer, &header, &slist);
 
 	if (!IsStandardPeFile(pFileBuffer))
@@ -234,35 +236,26 @@ DWORD CopyFileBufferToImageBuffer(IN LPVOID pFileBuffer,OUT LPVOID *pImageBuffer
 	return slist.sizeOfImage;
 }
 
-DWORD RvaDataToFoaData(IN LPVOID pImageBuffer, IN DWORD dwRvaDataAddress, BOOL isImageBuffer)
+DWORD RvaDataToFoaData(IN LPVOID pImageBuffer, IN DWORD dwRvaDataAddress)
 {
 	Header header;
 	SList slist;
-	DWORD imageOffset = 0;
 	DWORD virtualAddress = 0;
 	DWORD imageSectionSize = 0;
 	
 	InitializePheader(pImageBuffer,&header,&slist);
 
-	//5.11在做导入表的时候 要求直接在FileBuffer里面操作 就导致不需要ImageBuffer 要换回imagebase
-	//所以加了第三个参数 BOOL isImageBuffer
-
-	if (isImageBuffer)
-		imageOffset = dwRvaDataAddress - (DWORD)pImageBuffer;	//这里只是模拟所以不能用imagebase 此时pImagebase就是(虚拟的)ImageBase
-	else
-		imageOffset = dwRvaDataAddress;
-
 	//5.18在做绑定导出表的时候 RVA 250返回0显然错的 , 没有想到在区段前的数据 如果在, 直接返回即可
-	if (imageOffset < header.pSectionHeader->PointerToRawData)
-		return imageOffset;
+	if (dwRvaDataAddress < header.pSectionHeader->PointerToRawData)
+		return dwRvaDataAddress;
 
 	for (DWORD i = 0; i < slist.numOfSections; i++)
 	{
 		virtualAddress = header.pSectionHeader->VirtualAddress;
 		imageSectionSize = virtualAddress + header.pSectionHeader->Misc.VirtualSize;
 
-		if (imageOffset >= virtualAddress && imageOffset < imageSectionSize)
-			return imageOffset - virtualAddress + header.pSectionHeader->PointerToRawData;	//fileOffset
+		if (dwRvaDataAddress >= virtualAddress && dwRvaDataAddress < imageSectionSize)
+			return dwRvaDataAddress - virtualAddress + header.pSectionHeader->PointerToRawData;	//fileOffset
 
 		header.pSectionHeader++;
 	}
@@ -341,7 +334,7 @@ DWORD CopyImageBufferToFileBuffer(IN LPVOID pImageBuffer, OUT LPVOID * pFileBuff
 
 	DWORD dw_temp = (DWORD)pImageBuffer + header.pSectionHeader->VirtualAddress;
 	printf("This is a test for RvaDataOffset to RawDataOffset.\n");
-	printf("VirtualAddress: \n%x\nIn FileBuffer:\n%x.\n\n\n",dw_temp - (DWORD)pImageBuffer, RvaDataToFoaData(pImageBuffer, dw_temp,TRUE));
+	printf("VirtualAddress: \n%x\nIn FileBuffer:\n%x.\n\n\n",dw_temp - (DWORD)pImageBuffer, RvaDataToFoaData(pImageBuffer, dw_temp));
 
 	free(pImageBuffer);
 
@@ -355,7 +348,6 @@ DWORD BufferToFile(IN LPVOID pMemBuffer, IN size_t fileSize, OUT LPSTR lpszFile)
 	if (!(pfile = fopen(lpszFile, "wb")))
 	{
 		printf("Create file failed.");
-		fclose(pfile);
 		exit(0);
 	}
 
@@ -378,15 +370,15 @@ DWORD BufferToFile(IN LPVOID pMemBuffer, IN size_t fileSize, OUT LPSTR lpszFile)
 	return fileSize;
 }
 
-DWORD TraverseDataDirectory(LPVOID pBuffer,LPSTR inFilePath)
+DWORD TraverseDataDirectory(LPSTR inFilePath)
 {
 	Header header;
 	SList slist;
 	DWORD fileSize = 0;
 	PIMAGE_DATA_DIRECTORY pDataDirectory = NULL;
 
-	pBuffer = ReadPeFile(inFilePath, &fileSize);
-	InitializePheader(pBuffer, &header, &slist);
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &sizeOfFile);
+	InitializePheader(pFileBuffer, &header, &slist);
 
 	pDataDirectory = header.pOptionalHeader->DataDirectory;
 	
@@ -400,7 +392,7 @@ DWORD TraverseDataDirectory(LPVOID pBuffer,LPSTR inFilePath)
 	return 0;
 }
 
-DWORD PrintExportDirectory(LPVOID *pFileBuffer, LPSTR inFilePath)
+DWORD PrintExportDirectory(LPSTR inFilePath)
 {
 	Header header;
 	SList slist;
@@ -409,48 +401,48 @@ DWORD PrintExportDirectory(LPVOID *pFileBuffer, LPSTR inFilePath)
 	PIMAGE_DATA_DIRECTORY pDataDirectory = NULL;
 	PIMAGE_EXPORT_DIRECTORY pExportDirectory = NULL;
 
-	*pFileBuffer = ReadPeFile(inFilePath, &fileSize);
-	InitializePheader(*pFileBuffer, &header, &slist);
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &sizeOfFile);
+	InitializePheader(pFileBuffer, &header, &slist);
 	pDataDirectory = header.pOptionalHeader->DataDirectory;
-	foaExportDirectory = RvaDataToFoaData(*pFileBuffer, (*pDataDirectory).VirtualAddress, FALSE);
-	pExportDirectory = (PIMAGE_EXPORT_DIRECTORY)(foaExportDirectory + (DWORD)*pFileBuffer);
+	foaExportDirectory = RvaDataToFoaData(pFileBuffer, (*pDataDirectory).VirtualAddress);
+	pExportDirectory = (PIMAGE_EXPORT_DIRECTORY)(foaExportDirectory + (DWORD)pFileBuffer);
 
 	printf("Characteristic: %d\n", pExportDirectory->Characteristics);
 	printf("TimeDateStamp: %d\n", pExportDirectory->TimeDateStamp);
 	printf("MajorVersion: %d\n", pExportDirectory->MajorVersion);
 	printf("MinorVersion: %d\n", pExportDirectory->MinorVersion);
 
-	DWORD dw_temp = RvaDataToFoaData(*pFileBuffer, pExportDirectory->Name, FALSE);
+	DWORD dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->Name);
 	printf("Name: %x	FOA: %x\n", pExportDirectory->Name, dw_temp);
-	printf("String: %s\n", (char *)(DWORD(*pFileBuffer) + dw_temp));
+	printf("String: %s\n", (char *)(DWORD(pFileBuffer) + dw_temp));
 
 	printf("Base: %d\n", pExportDirectory->Base);
 	printf("NumberOfFunctions: %d\n", pExportDirectory->NumberOfFunctions);
 	printf("NumberOfNames: %d\n", pExportDirectory->NumberOfNames);
 
-	dw_temp = RvaDataToFoaData(*pFileBuffer, pExportDirectory->AddressOfFunctions, FALSE);
+	dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfFunctions);
 	printf("AddressOfFunctions: %x		FOA: %X\n", pExportDirectory->AddressOfFunctions,dw_temp);
 	for (DWORD i = 0; i < pExportDirectory->NumberOfFunctions; i++)
 	{	//名字地址转换FOA才是真正的名字
-		printf("AddressOfFuncition %d: %x\n", i,RvaDataToFoaData(*pFileBuffer, *(DWORD *)((DWORD)*pFileBuffer + dw_temp), FALSE));
+		printf("AddressOfFuncition %d: %x\n", i,RvaDataToFoaData(pFileBuffer, *(DWORD *)((DWORD)pFileBuffer + dw_temp)));
 		dw_temp += 4;
 	}
 
-	dw_temp = RvaDataToFoaData(*pFileBuffer, pExportDirectory->AddressOfNames, FALSE);
+	dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfNames);
 	printf("AddressOfNames: %x		FOA: %X\n", pExportDirectory->AddressOfNames, dw_temp);
 	for (DWORD i = 0; i < pExportDirectory->NumberOfNames; i++)
 	{	//名字地址转换FOA才是真正的名字
-		char *nameOfFunction = (char *)((DWORD)(*pFileBuffer) + RvaDataToFoaData(*pFileBuffer, *(DWORD *)((DWORD)*pFileBuffer + dw_temp), FALSE));
+		char *nameOfFunction = (char *)((DWORD)(pFileBuffer) + RvaDataToFoaData(pFileBuffer, *(DWORD *)((DWORD)pFileBuffer + dw_temp)));
 		printf("NameOfFuncition %d: %s\n", i, nameOfFunction);
 		dw_temp += 4;
 	}
 
-	dw_temp = RvaDataToFoaData(*pFileBuffer, pExportDirectory->AddressOfNameOrdinals, FALSE);	//Ordinals用Word存储!!!!
+	dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfNameOrdinals);	//Ordinals用Word存储!!!!
 	printf("AddressOfNameOrdinals: %x	FOA: %x\n", pExportDirectory->AddressOfNameOrdinals, dw_temp);
 	for(DWORD i=0;i<pExportDirectory->NumberOfNames;i++)
 	{	
 		//需要加base
-		printf("OrdinalOfFunction %d: %x\n", i, *(WORD *)((DWORD)(*pFileBuffer) + dw_temp) + pExportDirectory->Base);
+		printf("OrdinalOfFunction %d: %x\n", i, *(WORD *)((DWORD)(pFileBuffer) + dw_temp) + pExportDirectory->Base);
 		dw_temp += 2;
 	}
 	
@@ -471,14 +463,14 @@ DWORD GetFunctionAddrByName(LPVOID pFileBuffer, LPSTR functionToFind)
 
 	InitializePheader(pFileBuffer, &header, &slist);
 	pDataDirectory = header.pOptionalHeader->DataDirectory;
-	foaExportDirectory = RvaDataToFoaData(pFileBuffer, (*pDataDirectory).VirtualAddress, FALSE);
+	foaExportDirectory = RvaDataToFoaData(pFileBuffer, (*pDataDirectory).VirtualAddress);
 	pExportDirectory = (PIMAGE_EXPORT_DIRECTORY)(foaExportDirectory + (DWORD)pFileBuffer);
 
-	DWORD dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfNames, FALSE);
+	DWORD dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfNames);
 	for (; i < pExportDirectory->NumberOfNames; i++)
 	{
 		//坑爹的系统函数 相等竟然是为0
-		if (!strcmp(functionToFind, (char *)((DWORD)pFileBuffer+RvaDataToFoaData(pFileBuffer,*(DWORD *)((DWORD)pFileBuffer+dw_temp),FALSE))))
+		if (!strcmp(functionToFind, (char *)((DWORD)pFileBuffer+RvaDataToFoaData(pFileBuffer,*(DWORD *)((DWORD)pFileBuffer+dw_temp)))))
 			break;
 		dw_temp += 4;
 	}
@@ -486,13 +478,13 @@ DWORD GetFunctionAddrByName(LPVOID pFileBuffer, LPSTR functionToFind)
 	if (i == 4)
 		return 0;
 
-	dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfNameOrdinals, FALSE);
+	dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfNameOrdinals);
 	currentNumOfFunction = *((WORD *)((DWORD)(pFileBuffer)+dw_temp) + i);
 
-	dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfFunctions, FALSE);
-	printf("%s 's address is: %x: ", functionToFind, RvaDataToFoaData(pFileBuffer, *((DWORD *)((DWORD)pFileBuffer + dw_temp)+currentNumOfFunction), FALSE));
+	dw_temp = RvaDataToFoaData(pFileBuffer, pExportDirectory->AddressOfFunctions);
+	printf("%s 's address is: %x: ", functionToFind, RvaDataToFoaData(pFileBuffer, *((DWORD *)((DWORD)pFileBuffer + dw_temp)+currentNumOfFunction)));
 
-	return 1;
+	return 0;
 }
 //
 //Header header;
@@ -502,7 +494,7 @@ DWORD GetFunctionAddrByName(LPVOID pFileBuffer, LPSTR functionToFind)
 //pFileBuffer = ReadPeFile(inFilePath, &fileSize);
 //InitializePheader(pFileBuffer, &header, &slist);
 
-DWORD PrintBaseRelocation(LPVOID pFileBuffer, LPSTR inFilePath)
+DWORD PrintBaseRelocation(LPSTR inFilePath)
 {
 	Header header;
 	SList slist;
@@ -511,10 +503,10 @@ DWORD PrintBaseRelocation(LPVOID pFileBuffer, LPSTR inFilePath)
 	PIMAGE_DATA_DIRECTORY pDataDirectory = NULL;
 	PIMAGE_BASE_RELOCATION pBaseRelocation = NULL;
 
-	pFileBuffer = ReadPeFile(inFilePath, &fileSize);
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &sizeOfFile);
 	InitializePheader(pFileBuffer, &header, &slist);
 	pDataDirectory = header.pOptionalHeader->DataDirectory;
-	foaBaseRelocation = RvaDataToFoaData(pFileBuffer, (*(pDataDirectory+5)).VirtualAddress, FALSE);
+	foaBaseRelocation = RvaDataToFoaData(pFileBuffer, (*(pDataDirectory+5)).VirtualAddress);
 	pBaseRelocation = (PIMAGE_BASE_RELOCATION)((DWORD)pFileBuffer + foaBaseRelocation);
 
 	DWORD i = 0;
@@ -543,7 +535,7 @@ DWORD PrintBaseRelocation(LPVOID pFileBuffer, LPSTR inFilePath)
 		while (currentBlockItems--)
 		{
 			rvaOfData = ((*(WORD *)(foaOfBlock + (DWORD)pFileBuffer + 8)) & 0x0fff) + addressOf_rvaOfData;
-			foaOfData = (DWORD)RvaDataToFoaData(pFileBuffer,rvaOfData,FALSE);
+			foaOfData = (DWORD)RvaDataToFoaData(pFileBuffer,rvaOfData);
 			farAddress = *(DWORD *)(foaOfData + (DWORD)pFileBuffer);
 			if ((*(DWORD *)(foaOfBlock + (DWORD)pFileBuffer + 8) & 0x3000) == 0x3000)
 				attributeOfData = 3;
@@ -563,7 +555,7 @@ DWORD PrintBaseRelocation(LPVOID pFileBuffer, LPSTR inFilePath)
 	return sizeOfRelocation;
 }
 
-DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
+DWORD PrintImportDescriptor(LPSTR inFilePath)
 {
 	Header header;
 	SList slist;
@@ -572,11 +564,11 @@ DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 	PIMAGE_DATA_DIRECTORY pDataDirectory = NULL;
 	PIMAGE_IMPORT_DESCRIPTOR pImportDescriptor = NULL;
 
-	pFileBuffer = ReadPeFile(inFilePath, &fileSize);
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &sizeOfFile);
 	InitializePheader(pFileBuffer, &header, &slist);
 
 	pDataDirectory = header.pOptionalHeader->DataDirectory;
-	foaImportDescriptor = RvaDataToFoaData(pFileBuffer, (*(pDataDirectory + 1)).VirtualAddress, FALSE);
+	foaImportDescriptor = RvaDataToFoaData(pFileBuffer, (*(pDataDirectory + 1)).VirtualAddress);
 	pImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((DWORD)pFileBuffer + foaImportDescriptor);
 
 	while (pImportDescriptor->OriginalFirstThunk)
@@ -584,18 +576,18 @@ DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 		DWORD rvaFirstThunk = pImportDescriptor->FirstThunk;
 		DWORD rvaOriginalFirstThunk = pImportDescriptor->OriginalFirstThunk;
 		printf("RVA_OriginalFirstTunk: %2x    RVA_Name: %2x    RVA_FirstThunk: %2x\n", pImportDescriptor->OriginalFirstThunk, pImportDescriptor->Name, pImportDescriptor->FirstThunk);
-		DWORD FOA_Name = RvaDataToFoaData(pFileBuffer, pImportDescriptor->Name, FALSE);
+		DWORD FOA_Name = RvaDataToFoaData(pFileBuffer, pImportDescriptor->Name);
 		printf("DLL's name: %s\n", (char *)((DWORD)pFileBuffer + FOA_Name));
 		printf("-------------------------------------------------------------------------\n");
 
-		DWORD foaOriginalFirstThunk = RvaDataToFoaData(pFileBuffer, rvaOriginalFirstThunk, FALSE);
+		DWORD foaOriginalFirstThunk = RvaDataToFoaData(pFileBuffer, rvaOriginalFirstThunk);
 		DWORD originalThunkValue = *(DWORD *)((DWORD)pFileBuffer + foaOriginalFirstThunk);
 		printf("Show the OriginalFirstThunk:\n");
 		while (originalThunkValue)
 		{
 			printf("RVA_OriginalFirstThunk: %2x    FOA_OriginalFirstThunk: %2x", pImportDescriptor->OriginalFirstThunk, foaOriginalFirstThunk);
 			printf("    OriginalThunkValue: %2x\n", originalThunkValue);
-			if ((originalThunkValue & 0x80000000) == 0x1)
+			if ((originalThunkValue & 0x80000000) == 0x80000000)
 			{
 				DWORD ordinalOfFunction = (originalThunkValue & 0x0FFFFFFF);
 				TODO;
@@ -603,19 +595,19 @@ DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 			else
 			{
 				DWORD RVA_OFT_HintAndNameOfFunction = originalThunkValue;
-				DWORD FOA_OFT_HintAndNameOfFunction = RvaDataToFoaData(pFileBuffer, RVA_OFT_HintAndNameOfFunction, FALSE);
+				DWORD FOA_OFT_HintAndNameOfFunction = RvaDataToFoaData(pFileBuffer, RVA_OFT_HintAndNameOfFunction);
 				WORD hint = *(WORD *)((DWORD)pFileBuffer + FOA_OFT_HintAndNameOfFunction);
 				char * NameOfFunction = (char *)((DWORD)pFileBuffer + FOA_OFT_HintAndNameOfFunction + 2);
 				printf("RVA_OriginalThunkNameOfFunction: %2x    FOA_NameOfFunction: %2x\n", RVA_OFT_HintAndNameOfFunction, FOA_OFT_HintAndNameOfFunction);
 				printf("OriginalThunkHint: %2x\nNameOfFunction: %2s\n\n", hint, NameOfFunction);
 			}
-			pImportDescriptor->OriginalFirstThunk += 4;
-			foaOriginalFirstThunk = RvaDataToFoaData(pFileBuffer, pImportDescriptor->OriginalFirstThunk, FALSE);
+			pImportDescriptor->OriginalFirstThunk += 4;	//结束otf遍历时不用再恢复是因为不需要保存!!!
+			foaOriginalFirstThunk = RvaDataToFoaData(pFileBuffer, pImportDescriptor->OriginalFirstThunk);
 			originalThunkValue = *(DWORD *)((DWORD)pFileBuffer + foaOriginalFirstThunk);
 		}
 		puts("");
 
-		DWORD foaFirstThunk = RvaDataToFoaData(pFileBuffer, rvaFirstThunk, FALSE);
+		DWORD foaFirstThunk = RvaDataToFoaData(pFileBuffer, rvaFirstThunk);
 		DWORD firstThunkValue = *(DWORD *)((DWORD)pFileBuffer + foaFirstThunk);
 		printf("Show the FirstThunk: \n");
 		while (firstThunkValue)
@@ -623,7 +615,7 @@ DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 			printf("RVA_FirstThunk: %2x            FOA_FirstThunk: %2x", rvaFirstThunk, foaFirstThunk);
 			
 			printf("            FirstThunkValue: %2x\n", firstThunkValue);
-			if ((firstThunkValue & 0x80000000) == 0x1)
+			if ((firstThunkValue & 0x80000000) == 0x80000000)
 			{
 				DWORD ordinalOfFunction = (firstThunkValue & 0x7FFFFFFF);
 				TODO;
@@ -631,14 +623,14 @@ DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 			else
 			{
 				DWORD RVA_FT_HintAndNameOfFunction = firstThunkValue;
-				DWORD FOA_FT_HintAndNameOfFunction = RvaDataToFoaData(pFileBuffer, RVA_FT_HintAndNameOfFunction, FALSE);
+				DWORD FOA_FT_HintAndNameOfFunction = RvaDataToFoaData(pFileBuffer, RVA_FT_HintAndNameOfFunction);
 				WORD hint = *(WORD *)((DWORD)pFileBuffer + FOA_FT_HintAndNameOfFunction);
 				char * NameOfFunction = (char *)((DWORD)pFileBuffer + FOA_FT_HintAndNameOfFunction + 2);
 				printf("RVA_FirstThunkNameOfFunction: %2x    FOA_FirstThunkNameOfFunction: %2x\n", RVA_FT_HintAndNameOfFunction, FOA_FT_HintAndNameOfFunction);
 				printf("FirstThunkHint: %2x\nFirstThunkNameOfFunction: %2s\n\n", hint, NameOfFunction);
 			}
 			pImportDescriptor->FirstThunk += 4;
-			foaFirstThunk = RvaDataToFoaData(pFileBuffer, pImportDescriptor->FirstThunk, FALSE);
+			foaFirstThunk = RvaDataToFoaData(pFileBuffer, pImportDescriptor->FirstThunk);
 			firstThunkValue = *(DWORD *)((DWORD)pFileBuffer + foaFirstThunk);
 		}
 		puts("");
@@ -651,7 +643,7 @@ DWORD PrintImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 	return 1;
 }
 
-DWORD PrintBoundImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
+DWORD PrintBoundImportDescriptor(LPSTR inFilePath)
 {
 	Header header;
 	SList slist;
@@ -661,11 +653,11 @@ DWORD PrintBoundImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 	PIMAGE_BOUND_IMPORT_DESCRIPTOR pBoundImportDescriptor = NULL;
 	PIMAGE_BOUND_FORWARDER_REF pBoundForwarderRef = NULL;
 
-	pFileBuffer = ReadPeFile(inFilePath, &fileSize);
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &sizeOfFile);
 	InitializePheader(pFileBuffer, &header, &slist);
 
 	pDataDirectory = header.pOptionalHeader->DataDirectory;
-	foaBoundImportDescriptor = RvaDataToFoaData(pFileBuffer, (*(pDataDirectory + 11)).VirtualAddress, FALSE);
+	foaBoundImportDescriptor = RvaDataToFoaData(pFileBuffer, (*(pDataDirectory + 11)).VirtualAddress);
 	pBoundImportDescriptor = (PIMAGE_BOUND_IMPORT_DESCRIPTOR)((DWORD)pFileBuffer + foaBoundImportDescriptor);
 	DWORD currentDLL_NOMFR = 0;
 
@@ -707,6 +699,34 @@ DWORD PrintBoundImportDescriptor(LPVOID pFileBuffer, LPSTR inFilePath)
 	}
 
 	return 1;
+}
+
+DWORD GetSectionNum(LPVOID pFileBuffer, DWORD foaData)
+{
+	Header header;
+	SList slist;
+	DWORD fileOffset = foaData;
+	DWORD fileSectionOffset = 0;
+	DWORD fileSectionSize = 0;
+
+	InitializePheader(pFileBuffer, &header, &slist);
+
+	//5.14发现有的DLL文件会有个textbss段, 只占用内存空间 里面是未初始化的全局变量
+	//BSS: Block started by symbols
+	if (!strcmp((const char *)header.pSectionHeader->Name, ".textbss"))
+		header.pSectionHeader++;
+
+	for (DWORD i = 0; i < slist.numOfSections; i++)
+	{
+		fileSectionOffset = header.pSectionHeader->PointerToRawData;
+		fileSectionSize = fileSectionOffset + header.pSectionHeader->SizeOfRawData;
+
+		if (fileOffset >= fileSectionOffset && fileOffset < fileSectionSize)	//不能==file section size 等于的话应该算在下一个区段
+			return i + 1;
+
+		header.pSectionHeader++;
+	}
+	return 0;
 }
 
 

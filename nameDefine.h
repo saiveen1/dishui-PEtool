@@ -1,4 +1,16 @@
 #pragma once
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
+#include <algorithm>
+//max min sum ...函数
+#include <time.h>
+#include <conio.h>
+
+#pragma warning(disable:4996)
+
+#define XP_MESSAGEBOX 0x77d507ea
 #define ADDRESSS_OF_MESSAGEBOX &MessageBox
 #define SIZE_OF_SHELLCODE sizeof(shellCode) / sizeof(*shellCode)
 #define SIZE_OF_SECTION 0x28
@@ -31,7 +43,6 @@ typedef struct PeSimplifyList
 	//DWORD virtualSize;
 	//DWORD sizeOfRawData;
 	//DWORD pointerToRawData;//不确定是哪个节 不能这样赋值
-
 }SList, *PeList;
 
 typedef struct Header
