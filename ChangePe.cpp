@@ -83,7 +83,7 @@ DWORD AllocateNewSection(BYTE * nameOfSecton, size_t sizeOfNewSection, IN LPSTR 
 	sizeOfAllocation = sizeOfNewSection;
 	header.pFileHeader->NumberOfSections++;
 	header.pOptionalHeader->SizeOfImage += sizeOfNewSection;
-	slist.numOfSections++;	//定义的内容可以引用但无法更改 需要指针指向 工程量太大 不改了 因为下面还是用用到所以一起变
+	slist.numOfSections++;	//定义的内容可以引用但无法更改 需要指针指向
 	slist.sizeOfImage += sizeOfNewSection;
 
 	//printf("%x", (header.pSecitonHeader + slist.numOfSections - 2)->SizeOfRawData);
@@ -328,36 +328,29 @@ DWORD ChangeImageBase(LPSTR inFilePath, LPSTR outFilePath, DWORD newImageBase)
 	{
 		//要修改的数据大表在文件中的偏移 大表 + word 型偏移
 		foaOfBlock = (DWORD)pBaseRelocation - (DWORD)pFileBuffer;
-		printf("Block %2d    RVA: %x\n", 1 + i++, pBaseRelocation->VirtualAddress);
+		//printf("Block %2d    RVA: %x\n", 1 + i++, pBaseRelocation->VirtualAddress);
 		currentBlockItems = (pBaseRelocation->SizeOfBlock - 8) / 2;	//word 表示
-		printf("Items: %2x\n", currentBlockItems);
+		//printf("Items: %2x\n", currentBlockItems);
 
 		DWORD k = 0;
 		DWORD addressOf_rvaOfData = pBaseRelocation->VirtualAddress;
 		DWORD *pFarAddress = NULL;
 		DWORD differenceOfImageBase = newImageBase - slist.imageBase;
-		pBaseRelocation->VirtualAddress += 8;	//RVA start of the block data
+		//pBaseRelocation->VirtualAddress += 8;	//RVA start of the block data
 		header.pOptionalHeader->ImageBase = newImageBase;
 		while (currentBlockItems--)
 		{
 			rvaOfData = ((*(WORD *)(foaOfBlock + (DWORD)pFileBuffer + 8)) & 0x0fff) + addressOf_rvaOfData;
 			foaOfData = (DWORD)RvaDataToFoaData(pFileBuffer, rvaOfData);
 			pFarAddress = (DWORD *)(foaOfData + (DWORD)pFileBuffer);
-			attributeOfData = *(DWORD *)(foaOfBlock + (DWORD)pFileBuffer + 8) & 0x3000;
-			if (attributeOfData == 0x3000)
-			{
-				attributeOfData = 3;
-				*pFarAddress += differenceOfImageBase;
-			}
-			else
-				attributeOfData = 0;
-			printf("NO. %2d    RVA: %2x    FOA: %2x    FarAddress: %2x  Attribute: %d\n", 1 + k++, rvaOfData, foaOfData, *pFarAddress, attributeOfData);
+			*pFarAddress += differenceOfImageBase;
+			//printf("NO. %2d    RVA: %2x    FOA: %2x    FarAddress: %2x  Attribute: %d\n", 1 + k++, rvaOfData, foaOfData, *pFarAddress, attributeOfData);
 			foaOfBlock += 2;
-			pBaseRelocation->VirtualAddress += 2;
+			//pBaseRelocation->VirtualAddress += 2;
 		}
 
-		pBaseRelocation->VirtualAddress = pBaseRelocation->VirtualAddress - 2 * k - 8;	//还原VirtualAddress
-		puts("");
+		//pBaseRelocation->VirtualAddress = pBaseRelocation->VirtualAddress - 2 * k - 8;	//还原VirtualAddress
+		//puts("");
 		pBaseRelocation = (PIMAGE_BASE_RELOCATION)((DWORD)pBaseRelocation + pBaseRelocation->SizeOfBlock);
 	}
 

@@ -370,7 +370,7 @@ DWORD BufferToFile(IN LPVOID pMemBuffer, IN size_t fileSize, OUT LPSTR lpszFile)
 	return fileSize;
 }
 
-DWORD TraverseDataDirectory(LPSTR inFilePath)
+DWORD TraverseResourceDirectory(LPSTR inFilePath)
 {
 	Header header;
 	SList slist;
@@ -546,7 +546,7 @@ DWORD PrintBaseRelocation(LPSTR inFilePath)
 			pBaseRelocation->VirtualAddress += 2;
 		}
 
-		pBaseRelocation->VirtualAddress = pBaseRelocation->VirtualAddress - 2 * k;
+		pBaseRelocation->VirtualAddress = pBaseRelocation->VirtualAddress - 2 * k - 8;
 		puts("");
 		pBaseRelocation = (PIMAGE_BASE_RELOCATION)((DWORD)pBaseRelocation + pBaseRelocation->SizeOfBlock);
 	}
@@ -729,4 +729,83 @@ DWORD GetSectionNum(LPVOID pFileBuffer, DWORD foaData)
 	return 0;
 }
 
+DWORD PrintResourceDirectory(LPSTR inFilePath)
+{
+	Header header;
+	SList slist;
+	DWORD fileSize = 0;
+	PIMAGE_DATA_DIRECTORY pDataDirectory = NULL;
+	PIMAGE_RESOURCE_DIRECTORY pResourceDirectory = NULL;
 
+	LPVOID pFileBuffer = ReadPeFile(inFilePath, &fileSize);
+	InitializePheader(pFileBuffer, &header, &slist);
+	
+	DWORD foaSourceDirectory = 0;
+	pDataDirectory = header.pOptionalHeader->DataDirectory;
+	foaSourceDirectory = RvaDataToFoaData(pFileBuffer, (*(pDataDirectory + 2)).VirtualAddress);
+	pResourceDirectory = (PIMAGE_RESOURCE_DIRECTORY)((DWORD)pFileBuffer + foaSourceDirectory);
+
+	printf("Characteristics: %d\nNumberOfNamedEntries: %d\nNumberOfIDEntries: %d\n", pResourceDirectory->Characteristics, pResourceDirectory->NumberOfNamedEntries, pResourceDirectory->NumberOfIdEntries);
+	PIMAGE_RESOURCE_DIRECTORY_ENTRY pRDEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((DWORD)pResourceDirectory + SIZE_OF_RESOURCE_DIRECTORY);
+	printf("\nLevle1                       Levle2                       Levle3                       Item\n\n");
+
+	TraverseResourceDirectory(pFileBuffer, pResourceDirectory, 1, (DWORD)pResourceDirectory);
+
+	return 0;
+}
+
+VOID TraverseResourceDirectory(LPVOID pFileBuffer, PIMAGE_RESOURCE_DIRECTORY pResourceDirectory, DWORD directoryLevel,DWORD dwPRD)
+{
+	DWORD numOfpRDEntry = pResourceDirectory->NumberOfIdEntries + pResourceDirectory->NumberOfNamedEntries;
+	PIMAGE_RESOURCE_DIRECTORY_ENTRY pRDEntry = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((DWORD)pResourceDirectory + SIZE_OF_RESOURCE_DIRECTORY);
+	
+	for (DWORD i = 0; i < numOfpRDEntry; i++)
+	{
+		if (pRDEntry->NameIsString)
+		{
+			DWORD foaNameOfRD = dwPRD + pRDEntry->NameOffset;
+			PIMAGE_RESOURCE_DIR_STRING_U pRDString = (PIMAGE_RESOURCE_DIR_STRING_U)RvaDataToFoaData(pFileBuffer, foaNameOfRD);
+			WCHAR *rvaNameOfRDString = pRDString->NameString;
+			char *temp = new char[20];
+
+			memcpy(temp, rvaNameOfRDString, pRDString->Length);
+			printf("Level %d name of directory: %s\n", directoryLevel++,temp);
+
+			delete temp;
+		}
+		else
+		{
+			if (directoryLevel == 1)
+				printf("Item %d's ID: %d Name: %s\n", i + 1, pRDEntry->Id, WinResourceTable[pRDEntry->Id].name);
+			else if (directoryLevel == 2)
+			{
+				printf("                             ");
+				printf("Item %d's ID: %d\n", i + 1, pRDEntry->Id);
+			}
+			else
+			{
+				printf("                                                          ");
+				printf("Item %d's ID: %d\n", i + 1, pRDEntry->Id);
+			}
+		}
+				
+
+		if (pRDEntry->DataIsDirectory)
+		{
+			PIMAGE_RESOURCE_DIRECTORY pSecondaryDirectory = (PIMAGE_RESOURCE_DIRECTORY)(dwPRD + pRDEntry->OffsetToDirectory);
+			TraverseResourceDirectory(pFileBuffer, pSecondaryDirectory, ++directoryLevel, dwPRD);
+			directoryLevel--;
+		}
+		else
+		{
+			PIMAGE_RESOURCE_DATA_ENTRY pRDataEntry = (PIMAGE_RESOURCE_DATA_ENTRY)(dwPRD + pRDEntry->OffsetToData);
+			DWORD foaPDATA = RvaDataToFoaData(pFileBuffer, pRDataEntry->OffsetToData);
+			LPVOID pData = (LPVOID)((DWORD)pFileBuffer + foaPDATA);
+			printf("                                                          ");
+			printf("                             ");
+			printf("RVA: %x   FOA: %x\n\n", pRDataEntry->OffsetToData, foaPDATA);
+		}
+
+		pRDEntry++;
+	}
+}

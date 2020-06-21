@@ -18,11 +18,14 @@
 #define SIZE_OF_DOSHEADER 0x40
 #define SIZE_OF_EXPORTDIRECTORY 0x28
 #define SIZE_OF_IMPORT_DESCRIPTOR 0x14
+#define SIZE_OF_RESOURCE_DIRECTORY 0x10
 #define SIZE_OF_NEWSECTION_MOVE_IMPORT 0x1000	//移动导入表新加节大小
 #define SIZE_OF_NEWSECTION_MOVE_EXPORT 0x100000	//移动导出表新加节大小
 #define MAX_CHAR_ARR 20
 #define TODO 0
 #define NEED_TO_ALLOCATE_NEW_SECTION 2			//需要添加新的节
+
+
 
 typedef struct PeSimplifyList
 {
@@ -54,31 +57,10 @@ typedef struct Header
 	PIMAGE_SECTION_HEADER pSectionHeader = NULL;
 }*pHeader;
 
-
-typedef struct DosHeaderSimplifyList
+//资源类型名称映射表
+typedef struct tagRES_ID_NAME_TABLE
 {
-	DWORD dosSignature;			//e_magic	+0X04
-	DWORD sizeOfDosHeader = 0x3F;		//0X3c + sizeof(e_lfanew) = 0X3F
-}DosList;
-
-typedef struct FileHeaderSimplifyList
-{
-	DWORD sizeOfFileHeader = 0x14;
-	DWORD offSetOfFileHeader;	//e_lfanew	+0X3c	dosHeader
-	DWORD sizeOfOptionalHeader;	//32 E0 64 F0
-	DWORD numOfSections;
-}FileList;
-
-typedef struct OptionalHeaderSimplifyList
-{
-	FileList fl_temp;
-	DWORD offsetOfOptionalHeader = fl_temp.offSetOfFileHeader + fl_temp.sizeOfFileHeader;
-}OptionalList;
-
-typedef struct SectionHeaderSimplifyList
-{
-	OptionalList ql_temp;
-	DWORD offsetOfSectionHeader = ql_temp.offsetOfOptionalHeader + ql_temp.fl_temp.sizeOfOptionalHeader;
-	DWORD numOfSections;
-}SectionlList;
+	LPSTR	id;
+	char	name[_MAX_PATH];
+}WinResource;
 

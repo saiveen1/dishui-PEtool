@@ -151,7 +151,7 @@ Others:
 *************************************************/
 DWORD BufferToFile(IN LPVOID pMemBuffer, IN size_t fileSize, OUT LPSTR lpszFile);
 
-DWORD TraverseDataDirectory(LPSTR inFilePath);
+DWORD TraverseResourceDirectory(LPSTR inFilePath);
 
 
 /*************************************************
@@ -217,3 +217,33 @@ DWORD PrintImportDescriptor(LPSTR inFilePath);
 DWORD PrintBoundImportDescriptor(LPSTR inFilePath);
 
 DWORD GetSectionNum(LPVOID pFileBuffer, DWORD foaData);
+
+DWORD PrintResourceDirectory(LPSTR inFilePath);
+
+VOID TraverseResourceDirectory(LPVOID pFileBuffer, PIMAGE_RESOURCE_DIRECTORY pResourceDirectory, DWORD directoryLevel, DWORD dwPRD);
+
+static WinResource WinResourceTable[0x17] = {
+	{0, "Unknown"},
+	{RT_CURSOR, "光标"},
+	{RT_BITMAP, "位图"},
+	{RT_ICON, "图标"},
+	{RT_MENU, "菜单"},
+	{RT_DIALOG, "对话框"},
+	{RT_STRING, "字符串表"},
+	{RT_FONTDIR, "字体目录"},
+	{RT_FONT, "字体"},
+	{RT_ACCELERATOR, "加速器表"},
+	{RT_RCDATA, "自定义资源"},
+	{RT_MESSAGETABLE, "消息表"},
+	{RT_GROUP_CURSOR, "图标组"},
+	{0, "Unknown"},
+	{RT_GROUP_ICON, "光标组"},
+	{0, "Unknown"},
+	{RT_VERSION, "版本信息"},
+	{RT_PLUGPLAY, "即插即用资源"},
+	{RT_VXD, "Vxd"},
+	{RT_ANICURSOR, "动态光标"},
+	{RT_ANIICON, "动态图标"},
+	{RT_HTML, "HTML文档"},
+	{RT_MANIFEST, "XPManifest"},
+};
